@@ -12,24 +12,24 @@ DNo = "D-13-54-00542"            # Drawing Number
 # -----------------------------
 # Coil Details
 # -----------------------------
-cw = 406                         # Coil width (mm)
+cw = 407                         # Coil width (mm)
 ct = 0.8                         # Coil thickness (mm)
 # -----------------------------
 # Profile Details
 # -----------------------------
-hu = 3.45                        # Undulation height (mm)
-hn = 9.3                         # Notch height (mm)
+hu = 3.10                        # Undulation height (mm)
+hn = 8.9                         # Notch height (mm)
 p = 71.7                         # Notch pitch (mm)
 wn = 18.0                        # Notch width (mm)
 # -----------------------------
 # Basket Dimensions
 # -----------------------------
-qty = 2                          # Basket quantity
-lbo = 746                        # Bottom outer length (mm)
-lto = 905                        # Top outer length (mm)
-ho = 910                         # Outer height (mm)
-tbf = 4                          # Basket frame thickness (mm)
-tf = 3                           # Filling tolerance (mm)
+qty = 24                         # Basket quantity
+lbo = 509                        # Bottom outer length (mm)
+lto = 669                        # Top outer length (mm)
+ho = 911                         # Outer height (mm)
+tbf = 5                          # Basket frame thickness (mm)
+tf = 6                           # Filling tolerance (mm)
 web = 51.58                      # Empty Basket weight (kg)
 wmin = 250.48                    # Engg Minimum Basket weight (kg)
 wmax = 263.66                    # Engg Maximum Basket weight (kg)
@@ -92,9 +92,9 @@ def display_inputs(params):
     print("Bottom Length       :", round(params["lb"], 2), "mm")
     print("Top Length          :", round(params["lt"], 2), "mm")
     print("Height              :", round(params["h"], 2), "mm")
-    print("Tanθ (Increment)    :", round(params["incr"], 4))
+    print("Tanθ (Increment)    :", round(params["incr"], 2))
     print("Sheet Quantity      :", params["shq"], "Nos")
-    print("Corrected Notch W.  :", round(params["wnc"], 2), "mm")
+    print("Corrected Notch W.  :", round(params["wnc"], 1), "mm")
     print("Empty Basket Weight :", web, "kg")
     print("Minimum Basket Weight :", wmin, "kg")
     print("Maximum Basket Weight :", wmax, "kg")
@@ -221,47 +221,98 @@ def calculate_shear_length(sh1_length, sh2_length, c_value):
     return shear_length
 
 def create_matched_pairs(matched_sheets, method):
-    matched_pairs = []
-    # --------------------------------------------------------
-    # Create SH1 and SH2 sequences
-    # --------------------------------------------------------
-    sh1_sequence = list(matched_sheets)
-    sh2_sequence = list(reversed(matched_sheets))
-    # --------------------------------------------------------
-    # Pair SH1 with reversed SH2
-    # --------------------------------------------------------
-    for sh1, sh2 in zip(sh1_sequence, sh2_sequence):
-        # Avoid pairing a sheet with itself
-        if sh1[0] == sh2[0]:
-            continue
-        matched_pairs.append((sh1, sh2))
-    return matched_pairs
 
-def create_matched_pairs(matched_sheets, method):
-    matched_pairs = []
+    if not matched_sheets:
+        return []
+    # ---------------------------------------------------------
+    # Identify method type
+    # ---------------------------------------------------------
+    is_odd_even = ("Odd-Even" in method or "Even-Odd" in method)
 
-    # --------------------------------------------------------
-    # Single-sheet residual matching
-    # --------------------------------------------------------
-    if len(matched_sheets) == 1:
-        sh1 = matched_sheets[0]
-        sh2 = matched_sheets[0]
-        matched_pairs.append((sh1, sh2))
+    # ---------------------------------------------------------
+    # ODD-EVEN / EVEN-ODD
+    # ---------------------------------------------------------
+
+    if is_odd_even:
+
+        odd_sheets = [sheet for sheet in matched_sheets
+            if sheet[0] % 2 != 0]
+
+        even_sheets = [sheet for sheet in matched_sheets
+            if sheet[0] % 2 == 0]
+
+        # Nothing to pair
+        if not odd_sheets or not even_sheets:
+            return []
+
+        # Sort groups
+        odd_sheets.sort(key=lambda x: x[0])
+        even_sheets.sort(key=lambda x: x[0])
+
+        # Largest sheet determines SH1 group
+        largest_sheet = max(matched_sheets, key=lambda x: x[0])
+
+        if largest_sheet[0] % 2 != 0:
+            sh1_group = odd_sheets
+            sh2_group = even_sheets
+        else:
+            sh1_group = even_sheets
+            sh2_group = odd_sheets
+
+        # SH1 → descending
+        sh1_group = list(reversed(sh1_group))
+        # SH2 → ascending
+        sh2_group = list(sh2_group)
+        # Pair until one group is exhausted
+        pair_count = min(len(sh1_group), len(sh2_group))
+        matched_pairs = []
+
+        for i in range(pair_count):
+            sh1 = sh1_group[i]
+            sh2 = sh2_group[i]
+            matched_pairs.append((sh1, sh2))
         return matched_pairs
-        
-    # --------------------------------------------------------
-    # Normal SH1-SH2 reverse pairing
-    # --------------------------------------------------------
-    sh1_sequence = list(matched_sheets)
-    sh2_sequence = list(reversed(matched_sheets))
 
-    for sh1, sh2 in zip(sh1_sequence, sh2_sequence):
+    # ---------------------------------------------------------
+    # ODD-ODD / EVEN-EVEN
+    # ---------------------------------------------------------
+    matched_sheets = sorted(matched_sheets, key=lambda x: x[0])
+    total = len(matched_sheets)
 
-        # Don't pair the centre sheet with itself
-        if sh1[0] == sh2[0]:
-            continue
-        matched_pairs.append((sh1, sh2))
-    return matched_pairs
+    # ---------------------------------------------------------
+    # EVEN NUMBER OF SHEETS
+    # ---------------------------------------------------------
+    if total % 2 == 0:
+        half = total // 2
+        sh1_group = matched_sheets[:half]
+        sh2_group = list(reversed(matched_sheets[half:]))
+        matched_pairs = []
+
+        for sh1, sh2 in zip(sh1_group, sh2_group):
+            matched_pairs.append((sh1, sh2))
+        return matched_pairs
+
+    # ---------------------------------------------------------
+    # ODD NUMBER OF SHEETS
+    # ---------------------------------------------------------
+
+    else:
+        half = total // 2
+        sh1_group = matched_sheets[:half]
+
+        # Middle sheet
+        middle_sheet = matched_sheets[half]
+        # Sheets after middle
+        sh2_group = list(reversed(matched_sheets[half + 1:]))
+        matched_pairs = []
+
+        # Normal pairs
+        for sh1, sh2 in zip(sh1_group,sh2_group):
+            matched_pairs.append((sh1, sh2))
+
+        # Middle sheet pairs with itself
+        matched_pairs.append((middle_sheet, middle_sheet))
+        return matched_pairs
 
 def display_matched_sheet_table(stage_tables):
     print("\n" + "=" * 100)
@@ -787,6 +838,32 @@ def display_residual_result(solution):
         print("Matched Sheets      :", result["matched"])
         print("Matched Sheet Nos.  :", [sheet[0] for sheet in result["matched_sheets"]])
         print("Remaining Sheet Nos.:", [sheet[0] for sheet in result["remaining_sheets"]])
+def create_matched_sheet_table(matched_pairs, method, p, wnc, tol):
+    same_direction = "Same Direction" in method
+    if "Odd-Even" in method or "Even-Odd" in method:
+        odd_even = True
+    else:
+        odd_even = False
+
+    table = []
+
+    for sh1, sh2 in matched_pairs:
+        sh1_no = sh1[0]
+        sh1_length = sh1[2]
+
+        sh2_no = sh2[0]
+        sh2_length = sh2[2]
+        c_value = calculate_pair_c_value(sh1_length, sh2_length, odd_even, same_direction, p, wnc, tol)
+        shear_length = calculate_shear_length(sh1_length, sh2_length, c_value)
+
+        table.append({
+            "sh1_no": sh1_no,
+            "sh1_length": sh1_length,
+            "sh2_no": sh2_no,
+            "sh2_length": sh2_length,
+            "shear_length": shear_length,
+            "c_value": c_value})
+    return table
 
 # ============================================================
 # MAIN MATCHING PROCESS
