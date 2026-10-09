@@ -40,7 +40,7 @@ tol = 2                          # Allowable SHM tolerance (mm)
 # ------------------------------
 # Single Sheet Condition
 # ------------------------------
-max_shear_length = 1820
+max_shear_length = 1300
 group_size = 10
 
 # ============================================================
@@ -66,8 +66,7 @@ def calculate_parameters():
         "tol": tol,
         "max_shear_length": max_shear_length,
         "group_size": group_size,}
-    params = {"max_shear_length": max_shear_length,
-    "group_size": group_size}
+
     
 # ============================================================
 # DISPLAY INPUTS AND CALCULATED PARAMETERS
@@ -249,29 +248,37 @@ def calculate_shear_length(sh1_length, sh2_length, c_value):
     shear_length = sh1_length + sh2_length + 70 + c_value
     return shear_length
 
-def check_single_sheet_limit(group_results, max_shear_length):
-    for result in group_results:
-        if result["shear_length"] > max_shear_length:
+def check_single_sheet_limit(groups, max_shear_length):
+    for group in groups:
+        max_sheet_length = max(sheet[2] for sheet in group)
+        shear_length = max_sheet_length + 70
+
+        if shear_length > max_shear_length:
             return False
+
     return True
 
+def check_two_sheet_shear_limit(matched_table, max_shear_length):
+    for row in matched_table:
+        if row["shear_length"] > max_shear_length:
+            return True
+    return False
+
+
 def calculate_single_sheet_heal(groups):
-    group_results = []
+    table = []
 
     for group_number, group in enumerate(groups, start=1):
         max_sheet = max(group, key=lambda x: x[2])
-        max_sheet_no = max_sheet[0]
         max_sheet_length = max_sheet[2]
-        shear_length = max_sheet_length + 70
+        heal_length = max_sheet_length + 70
 
-        group_results.append({"group": group_number,
-            "start_sheet": group[0][0],
-            "end_sheet": group[-1][0],
-            "sheet_count": len(group),
-            "max_sheet_no": max_sheet_no,
-            "max_sheet_length": max_sheet_length,
-            "shear_length": shear_length})
-    return group_results
+        for sheet in group:
+            table.append({"group": group_number, "sh_no": sheet[0], "sh1_length": sheet[2], "heal_length": heal_length})
+        # Blank row between groups
+        if group_number < len(groups):
+            table.append(None)
+    return table
 
 def create_matched_pairs(matched_sheets, method):
 
@@ -394,21 +401,42 @@ def display_matched_sheet_table(stage_tables):
         print()
     print("=" * 100)
 
-def display_single_sheet_heal(group_results):
 
-    print("\n" + "=" * 100)
+def display_single_sheet_heal(table):
+    print("\n" + "=" * 65)
     print("SINGLE SHEET HEAL CUTTING CALCULATION")
-    print("=" * 100)
-    print(f"{'Group':>8}" f"{'Sheet Range':>18}" f"{'Qty':>8}" f"{'Max Sheet':>12}" f"{'Max Length':>18}" f"{'Shear Length':>18}")
-    print("-" * 100)
+    print("=" * 65)
+    print(f"{'SH No.':>10}" f"{'SH1 Length (mm)':>22}" f"{'HEAL Length (mm)':>22}")
+    print("-" * 65)
 
-    for result in group_results:
-        sheet_range = (f"{result['start_sheet']}" f"-" f"{result['end_sheet']}")
+    for row in table:
+        if row is None:
+            print()
+            continue
+        print(f"{row['sh_no']:>10}" f"{row['sh1_length']:>22.0f}" f"{row['heal_length']:>22.0f}")
+    print("=" * 65)
 
-        print(f"{result['group']:>8}" f"{sheet_range:>18}" f"{result['sheet_count']:>8}"
-              f"{result['max_sheet_no']:>12}" f"{result['max_sheet_length']:>18.3f}" f"{result['shear_length']:>18.3f}")
-    print("=" * 100)
-    
+def run_single_sheet_plan(odd_sheets, even_sheets, params):
+    all_sheets = odd_sheets + even_sheets
+    all_sheets.sort(key=lambda x: x[0])
+    groups = create_single_sheet_groups(all_sheets, params["group_size"])
+    group_results = calculate_single_sheet_heal(groups)
+    display_single_sheet_heal(group_results)
+
+    limit_ok = check_single_sheet_limit(groups, params["max_shear_length"])
+
+    print("\nMaximum Machine Shearing Length :", params["max_shear_length"], "mm")
+    print("\nSingle Sheet HEAL Limit Check")
+    print("-" * 60)
+
+    if limit_ok:
+        print("RESULT : All single-sheet groups are within")
+        print("        the machine shearing limit.")
+    else:
+        print("RESULT : WARNING - A single-sheet group also")
+        print("        exceeds the machine shearing limit.")
+    return group_results
+
 # ============================================================
 # GET METHOD NAME
 # ============================================================
@@ -1013,7 +1041,27 @@ def run_matching(odd_sheets, even_sheets, params):
         # Create HEAL table for this stage
         # ----------------------------------------------------
         matched_table = create_matched_sheet_table(matched_pairs, best_method, params["p"], params["wnc"], params["tol"])
-
+        
+        # ====================================================
+        # CHECK MAXIMUM MACHINE SHEARING LIMIT
+        # ====================================================
+        limit_exceeded = check_two_sheet_shear_limit(matched_table, params["max_shear_length"])
+        
+        if limit_exceeded:
+            print("\n" + "=" * 60)
+            print("       2-SHEET HEAL LENGTH LIMIT EXCEEDED")
+            print("=" * 60)
+            print("Maximum Machine Shearing Length :", params["max_shear_length"], "mm")
+            print("At least one 2-sheet HEAL shear length exceeds")
+            print("the machine shearing limit.")
+            print("\n2-sheet cutting plan is not continued.")
+            print("Switching to SINGLE-SHEET CUTTING PLAN.")        
+            # ------------------------------------------------
+            # Generate single-sheet plan for the complete basket
+            # ------------------------------------------------
+            run_single_sheet_plan(odd_sheets, even_sheets, params)        
+            return
+        
         # ----------------------------------------------------
         # Store stage table
         # ----------------------------------------------------
